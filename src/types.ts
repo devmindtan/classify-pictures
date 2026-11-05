@@ -20,6 +20,9 @@ export type MediaItem = {
   albumId: string
   confidence: number | null
   tags: string[]
+  caption?: string
+  objects?: string[]
+  ocrText?: string
   status: ProcessingStatus
   error?: string
 }
@@ -35,6 +38,7 @@ export type GpuHealth = {
   model: string
   device: 'cuda'
   gpu: string
+  capabilities?: string[]
 }
 
 export type InferenceEngine = 'gpu' | 'browser'

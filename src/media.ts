@@ -8,6 +8,16 @@ const GPU_CLASSIFIER_URL = 'http://127.0.0.1:3911'
 
 type Prediction = { label: string; score: number }
 
+type OpenAnalysis = {
+  album: string
+  filename: string
+  caption: string
+  tags: string[]
+  objects: string[]
+  ocr_text: string
+  confidence: number
+}
+
 export async function checkGpuClassifier(): Promise<GpuHealth | null> {
   try {
     const response = await fetch(`${GPU_CLASSIFIER_URL}/health`, { signal: AbortSignal.timeout(1800) })
@@ -178,19 +188,17 @@ async function imageBlobForGpu(item: MediaItem) {
   }
 }
 
-async function classifyWithGpu(image: Blob, labels: string[]): Promise<Prediction[]> {
-  const params = new URLSearchParams()
-  labels.forEach((label) => params.append('label', label))
-  const response = await fetch(`${GPU_CLASSIFIER_URL}/classify?${params.toString()}`, {
+async function classifyWithGpu(image: Blob): Promise<OpenAnalysis> {
+  const response = await fetch(`${GPU_CLASSIFIER_URL}/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': image.type || 'application/octet-stream' },
     body: image,
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(130_000),
   })
-  if (!response.ok) throw new Error(`GPU classifier trả về HTTP ${response.status}.`)
-  const result = await response.json() as { predictions?: Prediction[] }
-  if (!Array.isArray(result.predictions) || !result.predictions.length) throw new Error('GPU classifier không trả về kết quả.')
-  return result.predictions
+  if (!response.ok) throw new Error(`GPU vision trả về HTTP ${response.status}.`)
+  const result = await response.json() as OpenAnalysis
+  if (!result.album || !result.filename || !Array.isArray(result.tags)) throw new Error('GPU vision không trả về kết quả hợp lệ.')
+  return result
 }
 
 function resolvePrediction(predictions: Prediction[], fallback: string, engine: InferenceEngine) {
@@ -210,8 +218,18 @@ export async function classifyItem(item: MediaItem, onProgress: (progress: Model
   if (gpuAvailable) {
     try {
       frameBlob = await imageBlobForGpu(item)
-      const predictions = await classifyWithGpu(frameBlob, candidateLabels)
-      return resolvePrediction(predictions, fallback, 'gpu')
+      const result = await classifyWithGpu(frameBlob)
+      return {
+        albumId: '',
+        albumName: result.album,
+        filenameStem: result.filename,
+        confidence: result.confidence,
+        caption: result.caption,
+        tags: result.tags,
+        objects: result.objects,
+        ocrText: result.ocr_text,
+        engine: 'gpu' as const,
+      }
     } catch {
       // The private GPU may have gone offline; continue with the browser model.
     }
@@ -234,12 +252,12 @@ export async function classifyItem(item: MediaItem, onProgress: (progress: Model
   }
 }
 
-export function suggestedName(item: MediaItem, albumName: string, index: number) {
+export function suggestedName(item: MediaItem, albumName: string, index: number, filenameStem?: string) {
   const extension = extensionOf(item.originalName) || (item.kind === 'image' ? 'jpg' : 'mp4')
   const date = new Date(item.file.lastModified || Date.now())
   const datePart = Number.isNaN(date.getTime()) ? 'khong-ro-ngay' : date.toISOString().slice(0, 10)
-  const albumPart = sanitizeSegment(albumName).toLowerCase().replaceAll(' ', '-') || 'khac'
-  return `${albumPart}_${datePart}_${String(index + 1).padStart(3, '0')}.${extension}`
+  const description = sanitizeSegment(filenameStem || albumName).toLowerCase().replaceAll(/\s+/g, '-') || 'khac'
+  return `${description}_${datePart}_${String(index + 1).padStart(3, '0')}.${extension}`
 }
 
 export function sanitizeSegment(value: string) {

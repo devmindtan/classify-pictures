@@ -1,6 +1,6 @@
 # Localens
 
-Ứng dụng web local để phân tích, đổi tên và gom ảnh/video vào album. Media không được tải lên cloud. App ưu tiên model SigLIP trên máy GPU riêng qua SSH/Tailscale và tự chuyển sang CLIP trong trình duyệt khi GPU không sẵn sàng.
+Ứng dụng web local để phân tích, đổi tên và gom ảnh/video vào album. Media không được tải lên cloud. App ưu tiên Qwen3-VL trên máy GPU riêng qua SSH/Tailscale và tự chuyển sang CLIP trong trình duyệt khi GPU không sẵn sàng.
 
 ## Chạy local
 
@@ -15,13 +15,13 @@ Mở `http://127.0.0.1:4173`. `npm run dev` đồng thời mở tunnel loopback 
 
 ```bash
 npm run gpu:deploy  # chép service lên desktop-kndgm60, chỉ cần khi source GPU thay đổi
-npm run gpu:start   # mở SigLIP 2 + tunnel 127.0.0.1:3911
+npm run gpu:start   # mở Qwen3-VL + tunnel 127.0.0.1:3911
 npm run gpu:status
 npm run gpu:stop
 ```
 
 - Máy GPU: `desktop-kndgm60`, GTX 1660 SUPER 6 GB.
-- Model: `google/siglip-base-patch16-224` (Apache-2.0).
+- Model: `qwen3-vl:2b-instruct` qua Ollama (Apache-2.0, lượng tử hóa khoảng 1,9 GB).
 - Service chỉ bind `127.0.0.1:3910` trong WSL và chỉ được đưa về `127.0.0.1:3911` bằng SSH.
 - Không mở cổng Tailscale/LAN, không có dịch vụ cloud và không có API trả phí.
 - Nếu VoiceStudio hoặc Ollama đang giữ GPU 6 GB, Localens không giành VRAM và dùng model trình duyệt.
@@ -29,7 +29,7 @@ npm run gpu:stop
 ## Luồng sử dụng
 
 1. Chọn nhiều ảnh/video, một thư mục, hoặc tệp ZIP.
-2. Nhấn **Phân tích bằng GPU**. Nếu GPU tắt/bận, app tự dùng mô hình CLIP miễn phí trong browser cache.
+2. Nhấn **Phân tích bằng GPU**. Qwen3-VL tự tạo album theo nội dung, tên file, caption, tag, danh sách vật thể và OCR mà không dùng danh mục cố định. Nếu GPU tắt/bận, app tự dùng CLIP miễn phí trong browser cache.
 3. Kiểm tra tên file và album, chỉnh sửa nếu cần.
 4. Tải ZIP đã sắp xếp. Mỗi album là một thư mục và có thêm `phan-loai.json`.
 
@@ -45,6 +45,9 @@ npm run gpu:stop
 - `references/repos/transformers.js`
 - `references/repos/jszip`
 - `references/repos/ffmpeg.wasm`
+- `references/repos/qwen3-vl`
+- `references/repos/moondream`
+- `references/repos/immich`
 - `.agents/skills/playwright`
 - `.agents/skills/screenshot`
 - `.agents/skills/security-best-practices`
