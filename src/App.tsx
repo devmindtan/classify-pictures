@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import JSZip from 'jszip'
-import { Archive, Check, ChevronDown, CircleHelp, Download, FileArchive, FolderInput, Image as ImageIcon, LayoutGrid, ListFilter, LoaderCircle, LockKeyhole, Pencil, Play, Plus, RotateCcw, Search, ShieldCheck, Sparkles, Trash2, Upload, Video, X } from 'lucide-react'
+import { Archive, Check, ChevronDown, CircleHelp, Cpu, Download, FileArchive, FolderInput, Image as ImageIcon, ListFilter, LoaderCircle, LockKeyhole, Pencil, Play, Search, ShieldCheck, Sparkles, Trash2, Upload, Video, X } from 'lucide-react'
 import { DEFAULT_ALBUMS } from './catalog'
-import { classifyItem, expandInputFiles, makeMediaItem, sanitizeSegment, suggestedName } from './media'
-import type { AlbumDefinition, MediaItem, ModelProgress } from './types'
+import { checkGpuClassifier, classifyItem, expandInputFiles, makeMediaItem, sanitizeSegment, suggestedName } from './media'
+import type { AlbumDefinition, GpuHealth, InferenceEngine, MediaItem, ModelProgress } from './types'
 
 type Filter = 'all' | 'image' | 'video'
 
@@ -20,11 +20,25 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [activeAlbum, setActiveAlbum] = useState('all')
   const [showHelp, setShowHelp] = useState(false)
+  const [gpuHealth, setGpuHealth] = useState<GpuHealth | null>(null)
+  const [lastEngine, setLastEngine] = useState<InferenceEngine | null>(null)
+  const itemsRef = useRef<MediaItem[]>([])
   const fileInput = useRef<HTMLInputElement>(null)
   const archiveInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
 
-  useEffect(() => () => items.forEach((item) => URL.revokeObjectURL(item.previewUrl)), [])
+  useEffect(() => { itemsRef.current = items }, [items])
+  useEffect(() => () => itemsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl)), [])
+  useEffect(() => {
+    let active = true
+    const refresh = async () => {
+      const health = await checkGpuClassifier()
+      if (active) setGpuHealth(health)
+    }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 5000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [])
 
   const doneCount = items.filter((item) => item.status === 'done').length
   const albumCounts = useMemo(() => Object.fromEntries(albums.map((album) => [album.id, items.filter((item) => item.albumId === album.id).length])), [albums, items])
@@ -54,14 +68,21 @@ export default function App() {
     const targets = items.filter((item) => item.status !== 'done')
     if (!targets.length || isProcessing) return
     setIsProcessing(true)
+    let useGpu = Boolean(gpuHealth)
     for (const target of targets) {
       setItems((current) => current.map((item) => item.id === target.id ? { ...item, status: 'processing', error: undefined } : item))
-      const result = await classifyItem(target, setModelProgress)
+      const result = await classifyItem(target, setModelProgress, useGpu)
+      const { engine, ...classification } = result
+      setLastEngine(engine)
+      if (useGpu && engine === 'browser') {
+        useGpu = false
+        setGpuHealth(null)
+      }
       setItems((current) => {
-        const resolved = current.map((item) => item.id === target.id ? { ...item, ...result, status: 'done' as const } : item)
-        const album = albums.find((entry) => entry.id === result.albumId) ?? albums.at(-1)!
-        const siblings = resolved.filter((item) => item.albumId === result.albumId && item.id !== target.id)
-        return resolved.map((item) => item.id === target.id ? { ...item, outputName: suggestedName({ ...item, albumId: result.albumId }, album.name, siblings.length) } : item)
+        const resolved = current.map((item) => item.id === target.id ? { ...item, ...classification, status: 'done' as const } : item)
+        const album = albums.find((entry) => entry.id === classification.albumId) ?? albums.at(-1)!
+        const siblings = resolved.filter((item) => item.albumId === classification.albumId && item.id !== target.id)
+        return resolved.map((item) => item.id === target.id ? { ...item, outputName: suggestedName({ ...item, albumId: classification.albumId }, album.name, siblings.length) } : item)
       })
     }
     setModelProgress(null)
@@ -140,7 +161,10 @@ export default function App() {
           <a href="#workspace">Không gian làm việc</a>
           <button onClick={() => setShowHelp(true)}>Cách hoạt động</button>
         </nav>
-        <div className="privacy-pill"><LockKeyhole size={14} /> 100% trên thiết bị</div>
+        <div className={`privacy-pill ${gpuHealth ? 'gpu-online' : ''}`} title={gpuHealth ? `${gpuHealth.model} trên ${gpuHealth.gpu}` : 'CPU/WASM trong trình duyệt'}>
+          {gpuHealth ? <Cpu size={14} /> : <LockKeyhole size={14} />}
+          {gpuHealth ? 'GPU local đã kết nối' : '100% trên thiết bị'}
+        </div>
       </header>
 
       <main>
@@ -150,6 +174,7 @@ export default function App() {
           <p>Thả ảnh và video vào. Localens tự phân tích, đặt tên và gom chúng vào từng album — ngay trên máy của bạn.</p>
           <div className="trust-row">
             <span><ShieldCheck size={17} /> Không tải lên cloud</span>
+            <span><Cpu size={17} /> {gpuHealth ? 'SigLIP trên GPU riêng' : 'CPU local, tự chuyển GPU khi có'}</span>
             <span><Archive size={17} /> Xuất một tệp ZIP gọn gàng</span>
             <span><Pencil size={17} /> Chỉnh sửa trước khi tải</span>
           </div>
@@ -171,9 +196,9 @@ export default function App() {
               <button onClick={() => archiveInput.current?.click()}><FileArchive size={17} /> Chọn ZIP</button>
               <button onClick={() => folderInput.current?.click()}><FolderInput size={17} /> Chọn thư mục</button>
             </div>
-            <input ref={fileInput} hidden type="file" multiple accept="image/*,video/*" onChange={(event) => event.target.files && void importFiles(event.target.files)} />
-            <input ref={archiveInput} hidden type="file" multiple accept=".zip,application/zip" onChange={(event) => event.target.files && void importFiles(event.target.files)} />
-            <input ref={folderInput} hidden type="file" multiple {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)} onChange={(event) => event.target.files && void importFiles(event.target.files)} />
+            <input ref={fileInput} hidden type="file" multiple accept="image/*,video/*" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void importFiles(files) }} />
+            <input ref={archiveInput} hidden type="file" multiple accept=".zip,application/zip" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void importFiles(files) }} />
+            <input ref={folderInput} hidden type="file" multiple {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)} onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void importFiles(files) }} />
             <small>JPG, PNG, WebP, GIF, MP4, WebM, MOV và ZIP · tối đa 750 MB mỗi ZIP</small>
           </div>
 
@@ -190,7 +215,7 @@ export default function App() {
                   <button className="ghost danger" onClick={clearAll}><Trash2 size={16} /> Xóa tất cả</button>
                   <button className="analyze-button" onClick={() => void processAll()} disabled={isProcessing || doneCount === items.length}>
                     {isProcessing ? <LoaderCircle className="spin" size={18} /> : doneCount === items.length ? <Check size={18} /> : <Sparkles size={18} />}
-                    {isProcessing ? 'Đang phân tích…' : doneCount === items.length ? 'Đã phân loại' : 'Phân tích bằng AI'}
+                    {isProcessing ? 'Đang phân tích…' : doneCount === items.length ? 'Đã phân loại' : gpuHealth ? 'Phân tích bằng GPU' : 'Phân tích bằng AI'}
                   </button>
                 </div>
               </div>
@@ -202,24 +227,31 @@ export default function App() {
                     <b>{doneCount}/{items.length} tệp</b>
                   </div>
                   <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-                  {modelProgress && isProcessing && <small>{modelProgress.status === 'progress' ? `Đang tải mô hình local ${Math.round(modelProgress.progress ?? 0)}% · chỉ cần tải lần đầu` : 'Đang chuẩn bị mô hình local…'}</small>}
+                  {isProcessing && gpuHealth && <small>SigLIP đang chạy trên {gpuHealth.gpu} qua đường hầm riêng Tailscale.</small>}
+                  {isProcessing && !gpuHealth && modelProgress && <small>{modelProgress.status === 'progress' ? `Đang tải mô hình dự phòng ${Math.round(modelProgress.progress ?? 0)}% · chỉ cần tải lần đầu` : 'Đang chuẩn bị mô hình dự phòng trong trình duyệt…'}</small>}
+                  {!isProcessing && lastEngine && <small>Lượt phân tích vừa rồi dùng {lastEngine === 'gpu' ? 'SigLIP trên GPU local' : 'CLIP dự phòng trong trình duyệt'}.</small>}
                 </div>
               )}
 
               <div className="album-strip">
-                <button className={`album-card all ${activeAlbum === 'all' ? 'active' : ''}`} onClick={() => setActiveAlbum('all')}>
-                  <div className="album-art mosaic"><span /><span /><span /><span /></div>
-                  <strong>Tất cả</strong><small>{items.length} tệp</small>
-                </button>
-                {albums.filter((album) => albumCounts[album.id] > 0).map((album) => (
-                  <button className={`album-card ${activeAlbum === album.id ? 'active' : ''}`} key={album.id} onClick={() => setActiveAlbum(album.id)}>
-                    <div className="album-art" style={{ '--album-color': album.color } as React.CSSProperties}>
-                      {items.filter((item) => item.albumId === album.id).slice(0, 3).map((item) => item.kind === 'image' ? <img key={item.id} src={item.previewUrl} alt="" /> : <video key={item.id} src={item.previewUrl} muted />)}
-                      {!albumCounts[album.id] && <ImageIcon />}
-                    </div>
-                    <span className="album-title"><strong>{album.name}</strong><span onClick={(event) => { event.stopPropagation(); renameAlbum(album.id) }} role="button" tabIndex={0} aria-label={`Đổi tên ${album.name}`}><Pencil size={12} /></span></span>
-                    <small>{albumCounts[album.id]} tệp</small>
+                <div className={`album-card all ${activeAlbum === 'all' ? 'active' : ''}`}>
+                  <button className="album-select" onClick={() => setActiveAlbum('all')}>
+                    <div className="album-art mosaic"><span /><span /><span /><span /></div>
+                    <strong>Tất cả</strong><small>{items.length} tệp</small>
                   </button>
+                </div>
+                {albums.filter((album) => albumCounts[album.id] > 0).map((album) => (
+                  <div className={`album-card ${activeAlbum === album.id ? 'active' : ''}`} key={album.id}>
+                    <button className="album-select" onClick={() => setActiveAlbum(album.id)}>
+                      <div className="album-art" style={{ '--album-color': album.color } as React.CSSProperties}>
+                        {items.filter((item) => item.albumId === album.id).slice(0, 3).map((item) => item.kind === 'image' ? <img key={item.id} src={item.previewUrl} alt="" /> : <video key={item.id} src={item.previewUrl} muted />)}
+                        {!albumCounts[album.id] && <ImageIcon />}
+                      </div>
+                      <span className="album-title"><strong>{album.name}</strong></span>
+                      <small>{albumCounts[album.id]} tệp</small>
+                    </button>
+                    <button className="album-rename" onClick={() => renameAlbum(album.id)} aria-label={`Đổi tên ${album.name}`}><Pencil size={12} /></button>
+                  </div>
                 ))}
               </div>
 
@@ -268,7 +300,7 @@ export default function App() {
 
       <footer><span className="brand mini"><span className="brand-mark"><span /><span /><span /></span><span>localens</span></span><p>Ảnh của bạn ở lại với bạn.</p><span>Local-first · Open-source ready</span></footer>
 
-      {showHelp && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowHelp(false) }}><section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title"><button className="modal-close" onClick={() => setShowHelp(false)}><X /></button><span className="eyebrow">3 bước đơn giản</span><h2 id="help-title">Từ hỗn độn đến ngăn nắp</h2><div className="steps"><div><b>01</b><Upload /><h3>Nạp thư viện</h3><p>Chọn nhiều tệp, cả thư mục hoặc ZIP. Mọi thứ chỉ được đọc trên máy.</p></div><div><b>02</b><Sparkles /><h3>AI phân tích</h3><p>Mô hình CLIP nhận diện nội dung ảnh và các khung hình đại diện của video.</p></div><div><b>03</b><Download /><h3>Kiểm tra & tải</h3><p>Đổi tên, chuyển album rồi tải một ZIP đã sắp xếp hoàn chỉnh.</p></div></div><p className="model-note"><ShieldCheck /> Lần chạy AI đầu tiên cần Internet để tải mô hình miễn phí; các lần sau dùng bản đã lưu trong cache trình duyệt.</p></section></div>}
+      {showHelp && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowHelp(false) }}><section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title"><button className="modal-close" onClick={() => setShowHelp(false)}><X /></button><span className="eyebrow">3 bước đơn giản</span><h2 id="help-title">Từ hỗn độn đến ngăn nắp</h2><div className="steps"><div><b>01</b><Upload /><h3>Nạp thư viện</h3><p>Chọn nhiều tệp, cả thư mục hoặc ZIP. Media không được gửi lên cloud.</p></div><div><b>02</b><Sparkles /><h3>AI phân tích</h3><p>SigLIP chạy trên GPU riêng; CLIP trong trình duyệt tự tiếp quản khi GPU tắt.</p></div><div><b>03</b><Download /><h3>Kiểm tra & tải</h3><p>Đổi tên, chuyển album rồi tải một ZIP đã sắp xếp hoàn chỉnh.</p></div></div><p className="model-note"><ShieldCheck /> Kết nối GPU đi qua SSH/Tailscale và chỉ xuất hiện ở loopback 127.0.0.1; không có API trả phí hay cổng công khai.</p></section></div>}
     </div>
   )
 }

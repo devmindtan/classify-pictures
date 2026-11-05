@@ -1,9 +1,23 @@
 import JSZip from 'jszip'
 import { ACCEPTED_IMAGE_EXTENSIONS, ACCEPTED_VIDEO_EXTENSIONS, DEFAULT_ALBUMS, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, MAX_ENTRY_BYTES } from './catalog'
-import type { MediaItem, ModelProgress } from './types'
+import type { GpuHealth, InferenceEngine, MediaItem, ModelProgress } from './types'
 
 type Classifier = (input: string, labels: string[]) => Promise<Array<{ label: string; score: number }>>
 let classifierPromise: Promise<Classifier> | null = null
+const GPU_CLASSIFIER_URL = 'http://127.0.0.1:3911'
+
+type Prediction = { label: string; score: number }
+
+export async function checkGpuClassifier(): Promise<GpuHealth | null> {
+  try {
+    const response = await fetch(`${GPU_CLASSIFIER_URL}/health`, { signal: AbortSignal.timeout(1800) })
+    if (!response.ok) return null
+    const health = await response.json() as GpuHealth
+    return health.status === 'ok' && health.device === 'cuda' ? health : null
+  } catch {
+    return null
+  }
+}
 
 export function extensionOf(name: string) {
   const part = name.toLowerCase().split('.').pop()
@@ -123,7 +137,7 @@ function waitFor(target: HTMLMediaElement, event: string) {
   })
 }
 
-async function videoFrameUrl(file: File) {
+async function videoFrameBlob(file: File) {
   const video = document.createElement('video')
   video.muted = true
   video.preload = 'metadata'
@@ -139,7 +153,7 @@ async function videoFrameUrl(file: File) {
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
     canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height)
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Không trích xuất được khung hình.')), 'image/jpeg', 0.86))
-    return URL.createObjectURL(blob)
+    return blob
   } finally {
     video.removeAttribute('src')
     video.load()
@@ -147,26 +161,74 @@ async function videoFrameUrl(file: File) {
   }
 }
 
-export async function classifyItem(item: MediaItem, onProgress: (progress: ModelProgress) => void) {
+async function imageBlobForGpu(item: MediaItem) {
+  if (item.kind === 'video') return videoFrameBlob(item.file)
+  try {
+    const bitmap = await createImageBitmap(item.file, { imageOrientation: 'from-image' })
+    const scale = Math.min(1, 1280 / Math.max(bitmap.width, bitmap.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close()
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Không chuyển đổi được ảnh.')), 'image/jpeg', 0.9))
+  } catch {
+    if (item.file.size <= 25 * 1024 * 1024) return item.file
+    throw new Error('Ảnh vượt giới hạn 25 MB và trình duyệt không thể thu nhỏ.')
+  }
+}
+
+async function classifyWithGpu(image: Blob, labels: string[]): Promise<Prediction[]> {
+  const params = new URLSearchParams()
+  labels.forEach((label) => params.append('label', label))
+  const response = await fetch(`${GPU_CLASSIFIER_URL}/classify?${params.toString()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': image.type || 'application/octet-stream' },
+    body: image,
+    signal: AbortSignal.timeout(45_000),
+  })
+  if (!response.ok) throw new Error(`GPU classifier trả về HTTP ${response.status}.`)
+  const result = await response.json() as { predictions?: Prediction[] }
+  if (!Array.isArray(result.predictions) || !result.predictions.length) throw new Error('GPU classifier không trả về kết quả.')
+  return result.predictions
+}
+
+function resolvePrediction(predictions: Prediction[], fallback: string, engine: InferenceEngine) {
+  const candidateAlbums = DEFAULT_ALBUMS.filter((album) => album.id !== 'other')
+  const best = predictions[0]
+  const album = candidateAlbums.find((entry) => entry.prompt === best?.label)
+  if (!best || !album || best.score < 0.19) {
+    return { albumId: fallback, confidence: best?.score ?? null, tags: predictions.slice(0, 3).map((value) => value.label), engine }
+  }
+  return { albumId: album.id, confidence: best.score, tags: predictions.slice(0, 3).map((value) => value.label), engine }
+}
+
+export async function classifyItem(item: MediaItem, onProgress: (progress: ModelProgress) => void, gpuAvailable = false) {
   const fallback = filenameGuess(item.originalName)
+  const candidateLabels = DEFAULT_ALBUMS.filter((album) => album.id !== 'other').map((album) => album.prompt)
+  let frameBlob: Blob | null = null
+  if (gpuAvailable) {
+    try {
+      frameBlob = await imageBlobForGpu(item)
+      const predictions = await classifyWithGpu(frameBlob, candidateLabels)
+      return resolvePrediction(predictions, fallback, 'gpu')
+    } catch {
+      // The private GPU may have gone offline; continue with the browser model.
+    }
+  }
   let analysisUrl = item.previewUrl
   let temporaryFrame = false
   try {
     if (item.kind === 'video') {
-      analysisUrl = await videoFrameUrl(item.file)
+      frameBlob ??= await videoFrameBlob(item.file)
+      analysisUrl = URL.createObjectURL(frameBlob)
       temporaryFrame = true
     }
     const classifier = await getClassifier(onProgress)
-    const candidateAlbums = DEFAULT_ALBUMS.filter((album) => album.id !== 'other')
-    const predictions = await classifier(analysisUrl, candidateAlbums.map((album) => album.prompt))
-    const best = predictions[0]
-    const album = candidateAlbums.find((entry) => entry.prompt === best?.label)
-    if (!best || !album || best.score < 0.19) {
-      return { albumId: fallback, confidence: best?.score ?? null, tags: predictions.slice(0, 3).map((value) => value.label) }
-    }
-    return { albumId: album.id, confidence: best.score, tags: predictions.slice(0, 3).map((value) => value.label) }
+    const predictions = await classifier(analysisUrl, candidateLabels)
+    return resolvePrediction(predictions, fallback, 'browser')
   } catch (error) {
-    return { albumId: fallback, confidence: null, tags: [], error: error instanceof Error ? error.message : 'Không thể phân tích tệp.' }
+    return { albumId: fallback, confidence: null, tags: [], engine: 'browser' as const, error: error instanceof Error ? error.message : 'Không thể phân tích tệp.' }
   } finally {
     if (temporaryFrame) URL.revokeObjectURL(analysisUrl)
   }

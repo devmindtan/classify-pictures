@@ -1,5 +1,10 @@
 node_modules/
 dist/
 output/
+.playwright-cli/
+.gpu/
+*.tsbuildinfo
+__pycache__/
+*.pyc
 *.log
 .DS_Store

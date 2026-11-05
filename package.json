@@ -4,7 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "node tools/dev.cjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "gpu:deploy": "node tools/gpu-classifier.cjs deploy",
+    "gpu:start": "node tools/gpu-classifier.cjs start",
+    "gpu:status": "node tools/gpu-classifier.cjs status",
+    "gpu:stop": "node tools/gpu-classifier.cjs stop",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "check": "tsc -b --pretty false"

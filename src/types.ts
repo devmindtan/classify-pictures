@@ -29,3 +29,12 @@ export type ModelProgress = {
   progress?: number
   file?: string
 }
+
+export type GpuHealth = {
+  status: 'ok' | 'starting'
+  model: string
+  device: 'cuda'
+  gpu: string
+}
+
+export type InferenceEngine = 'gpu' | 'browser'
