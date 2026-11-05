@@ -29,7 +29,7 @@ npm run gpu:stop
 ## Luồng sử dụng
 
 1. Chọn nhiều ảnh/video, một thư mục, hoặc tệp ZIP.
-2. Nhấn **Phân tích bằng GPU**. Qwen3-VL tự tạo album theo nội dung, tên file, caption, tag, danh sách vật thể và OCR mà không dùng danh mục cố định. Nếu GPU tắt/bận, app tự dùng CLIP miễn phí trong browser cache.
+2. Nhấn **Phân tích bằng GPU**. Qwen3-VL chọn trong taxonomy phân cấp 17 nhóm lớn/136 nhóm con, đồng thời tạo tên file, caption, tag, danh sách vật thể và OCR. Validator kiểm tra quan hệ cha-con, loại nội dung, ngưỡng tin cậy và bằng chứng; kết quả mơ hồ được đánh dấu **Cần kiểm tra**. Nếu GPU tắt/bận, app tự dùng CLIP miễn phí trong browser cache.
 3. Kiểm tra tên file và album, chỉnh sửa nếu cần.
 4. Tải ZIP đã sắp xếp. Mỗi album là một thư mục và có thêm `phan-loai.json`.
 
@@ -48,6 +48,11 @@ npm run gpu:stop
 - `references/repos/qwen3-vl`
 - `references/repos/moondream`
 - `references/repos/immich`
+- `references/repos/places365`
+- `references/repos/recognize-anything`
+- `references/repos/lvis-api`
 - `.agents/skills/playwright`
 - `.agents/skills/screenshot`
 - `.agents/skills/security-best-practices`
+
+Quy tắc chi tiết nằm tại [`docs/classification-rules.md`](docs/classification-rules.md); taxonomy runtime nằm tại [`gpu/taxonomy.json`](gpu/taxonomy.json).

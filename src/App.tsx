@@ -87,7 +87,7 @@ export default function App() {
       setItems((current) => current.map((item) => item.id === target.id ? { ...item, status: 'processing', error: undefined } : item))
       const result = await classifyItem(target, setModelProgress, useGpu)
       const { engine, ...classification } = result
-      const openResult = classification as typeof classification & { albumName?: string; filenameStem?: string; caption?: string; objects?: string[]; ocrText?: string }
+      const openResult = classification as typeof classification & { albumName?: string; filenameStem?: string; caption?: string; objects?: string[]; ocrText?: string; taxonomyVersion?: string; category?: string; subcategory?: string; evidence?: string[]; classificationReason?: string; reviewRequired?: boolean; reviewReasons?: string[] }
       let resolvedAlbumId = classification.albumId
       if (openResult.albumName) {
         const resolvedAlbum = dynamicAlbum(openResult.albumName, albumsRef.current)
@@ -111,6 +111,13 @@ export default function App() {
           caption: openResult.caption,
           objects: openResult.objects,
           ocrText: openResult.ocrText,
+          taxonomyVersion: openResult.taxonomyVersion,
+          category: openResult.category,
+          subcategory: openResult.subcategory,
+          evidence: openResult.evidence,
+          classificationReason: openResult.classificationReason,
+          reviewRequired: openResult.reviewRequired,
+          reviewReasons: openResult.reviewReasons,
           error: 'error' in classification ? classification.error : undefined,
           status: 'done' as const,
         } : item)
@@ -167,7 +174,7 @@ export default function App() {
         const dot = requestedName.lastIndexOf('.')
         const uniqueName = duplicateIndex === 0 ? requestedName : `${requestedName.slice(0, dot > 0 ? dot : undefined)}_${duplicateIndex + 1}${dot > 0 ? requestedName.slice(dot) : ''}`
         zip.folder(folderName)?.file(uniqueName, item.file)
-        manifest.push({ original: item.sourcePath, output: `${folderName}/${uniqueName}`, confidence: item.confidence, caption: item.caption, tags: item.tags, objects: item.objects, ocrText: item.ocrText })
+        manifest.push({ original: item.sourcePath, output: `${folderName}/${uniqueName}`, taxonomyVersion: item.taxonomyVersion, category: item.category, subcategory: item.subcategory, confidence: item.confidence, reviewRequired: item.reviewRequired, reviewReasons: item.reviewReasons, evidence: item.evidence, classificationReason: item.classificationReason, caption: item.caption, tags: item.tags, objects: item.objects, ocrText: item.ocrText })
       }
       zip.file('phan-loai.json', JSON.stringify({ exportedAt: new Date().toISOString(), files: manifest }, null, 2))
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 5 }, streamFiles: true })
@@ -261,7 +268,7 @@ export default function App() {
                     <b>{doneCount}/{items.length} tệp</b>
                   </div>
                   <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-                  {isProcessing && gpuHealth && <small>Qwen3-VL đang tự tạo album, caption và OCR trên {gpuHealth.gpu} qua đường hầm riêng Tailscale.</small>}
+                  {isProcessing && gpuHealth && <small>Qwen3-VL đang đối chiếu taxonomy {gpuHealth.taxonomy ?? ''}, bằng chứng và OCR trên {gpuHealth.gpu}.</small>}
                   {isProcessing && !gpuHealth && modelProgress && <small>{modelProgress.status === 'progress' ? `Đang tải mô hình dự phòng ${Math.round(modelProgress.progress ?? 0)}% · chỉ cần tải lần đầu` : 'Đang chuẩn bị mô hình dự phòng trong trình duyệt…'}</small>}
                   {!isProcessing && lastEngine && <small>Lượt phân tích vừa rồi dùng {lastEngine === 'gpu' ? 'Qwen3-VL trên GPU local' : 'CLIP dự phòng trong trình duyệt'}.</small>}
                 </div>
@@ -307,7 +314,7 @@ export default function App() {
                   return <article className="media-card" key={item.id}>
                     <div className="media-preview">
                       {item.kind === 'image' ? <img src={item.previewUrl} alt={item.originalName} /> : <><video src={item.previewUrl} muted preload="metadata" /><span className="play"><Play size={16} fill="currentColor" /></span></>}
-                      <span className={`status-badge ${item.status}`}>{item.status === 'processing' ? <><LoaderCircle className="spin" size={11} /> Đang đọc</> : item.status === 'done' ? <><Check size={11} /> {item.confidence ? `${Math.round(item.confidence * 100)}%` : 'Đã xếp'}</> : 'Chưa xử lý'}</span>
+                      <span className={`status-badge ${item.status} ${item.reviewRequired ? 'needs-review' : ''}`}>{item.status === 'processing' ? <><LoaderCircle className="spin" size={11} /> Đang đọc</> : item.status === 'done' ? item.reviewRequired ? <><CircleHelp size={11} /> Cần kiểm tra</> : <><Check size={11} /> {item.confidence ? `${Math.round(item.confidence * 100)}%` : 'Đã xếp'}</> : 'Chưa xử lý'}</span>
                       <button className="remove" onClick={() => removeItem(item.id)} aria-label={`Xóa ${item.originalName}`}><X size={14} /></button>
                     </div>
                     <div className="media-body">
@@ -318,6 +325,8 @@ export default function App() {
                       <small className="original">Gốc: {item.originalName}</small>
                       {item.caption && <p className="ai-caption">{item.caption}</p>}
                       {item.tags.length > 0 && <div className="ai-tags">{item.tags.slice(0, 5).map((tag) => <span key={tag}>{tag}</span>)}</div>}
+                      {item.classificationReason && <small className="classification-reason">Lý do: {item.classificationReason}</small>}
+                      {item.reviewRequired && <small className="review-reasons">Cần kiểm tra: {item.reviewReasons?.join(' · ')}</small>}
                       {item.ocrText && <small className="ocr-text" title={item.ocrText}>OCR: {item.ocrText}</small>}
                       {item.error && <small className="fallback-note" title={item.error}>Đã dùng tên tệp để phân loại</small>}
                     </div>
@@ -337,7 +346,7 @@ export default function App() {
 
       <footer><span className="brand mini"><span className="brand-mark"><span /><span /><span /></span><span>localens</span></span><p>Ảnh của bạn ở lại với bạn.</p><span>Local-first · Open-source ready</span></footer>
 
-      {showHelp && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowHelp(false) }}><section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title"><button className="modal-close" onClick={() => setShowHelp(false)}><X /></button><span className="eyebrow">3 bước đơn giản</span><h2 id="help-title">Từ hỗn độn đến ngăn nắp</h2><div className="steps"><div><b>01</b><Upload /><h3>Nạp thư viện</h3><p>Chọn nhiều tệp, cả thư mục hoặc ZIP. Media không được gửi lên cloud.</p></div><div><b>02</b><Sparkles /><h3>AI phân tích mở</h3><p>Qwen3-VL tự tạo album, tên file, caption, tag và OCR; không ép vào danh mục cố định.</p></div><div><b>03</b><Download /><h3>Kiểm tra & tải</h3><p>Đổi tên, chuyển album rồi tải một ZIP đã sắp xếp hoàn chỉnh.</p></div></div><p className="model-note"><ShieldCheck /> Kết nối GPU đi qua SSH/Tailscale và chỉ xuất hiện ở loopback 127.0.0.1; không có API trả phí hay cổng công khai.</p></section></div>}
+      {showHelp && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowHelp(false) }}><section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title"><button className="modal-close" onClick={() => setShowHelp(false)}><X /></button><span className="eyebrow">3 bước đơn giản</span><h2 id="help-title">Từ hỗn độn đến ngăn nắp</h2><div className="steps"><div><b>01</b><Upload /><h3>Nạp thư viện</h3><p>Chọn nhiều tệp, cả thư mục hoặc ZIP. Media không được gửi lên cloud.</p></div><div><b>02</b><Sparkles /><h3>AI có kiểm soát</h3><p>Qwen3-VL chọn taxonomy 2 tầng, nêu bằng chứng và tự đánh dấu kết quả mơ hồ để bạn kiểm tra.</p></div><div><b>03</b><Download /><h3>Kiểm tra & tải</h3><p>Đổi tên, chuyển album rồi tải một ZIP đã sắp xếp hoàn chỉnh.</p></div></div><p className="model-note"><ShieldCheck /> Kết nối GPU đi qua SSH/Tailscale và chỉ xuất hiện ở loopback 127.0.0.1; không có API trả phí hay cổng công khai.</p></section></div>}
     </div>
   )
 }

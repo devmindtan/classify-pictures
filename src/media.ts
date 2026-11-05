@@ -9,12 +9,19 @@ const GPU_CLASSIFIER_URL = 'http://127.0.0.1:3911'
 type Prediction = { label: string; score: number }
 
 type OpenAnalysis = {
+  taxonomy_version: string
+  category: string
+  subcategory: string
   album: string
   filename: string
   caption: string
   tags: string[]
   objects: string[]
   ocr_text: string
+  evidence: string[]
+  classification_reason: string
+  review_required: boolean
+  review_reasons: string[]
   confidence: number
 }
 
@@ -228,6 +235,13 @@ export async function classifyItem(item: MediaItem, onProgress: (progress: Model
         tags: result.tags,
         objects: result.objects,
         ocrText: result.ocr_text,
+        taxonomyVersion: result.taxonomy_version,
+        category: result.category,
+        subcategory: result.subcategory,
+        evidence: result.evidence,
+        classificationReason: result.classification_reason,
+        reviewRequired: result.review_required,
+        reviewReasons: result.review_reasons,
         engine: 'gpu' as const,
       }
     } catch {

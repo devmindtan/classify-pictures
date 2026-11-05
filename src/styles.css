@@ -146,6 +146,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .ai-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0; }
 .ai-tags span { background: #f1f2ed; border-radius: 999px; color: #686b62; font-size: 8px; padding: 3px 6px; }
 .ocr-text { display: block; color: #667b70; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-badge.needs-review { background: #fff1d8; color: #985f1f; }
+.classification-reason { display: block; color: #777b72; font-size: 8px; line-height: 1.35; margin-top: 5px; }
+.review-reasons { display: block; background: #fff5e5; border-radius: 6px; color: #985f1f; font-size: 8px; line-height: 1.4; margin-top: 5px; padding: 5px 6px; }
 
 .export-bar { margin-top: 28px; border: 1px solid #cfd9c8; border-radius: 14px; background: #eef5e8; padding: 17px 19px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; }
 .export-icon { width: 39px; height: 39px; border-radius: 10px; display: grid; place-items: center; color: var(--green); background: #dbe9d0; }
