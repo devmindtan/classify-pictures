@@ -82,7 +82,9 @@ export default function App() {
     const targets = items.filter((item) => item.status !== 'done')
     if (!targets.length || isProcessing) return
     setIsProcessing(true)
-    let useGpu = Boolean(gpuHealth)
+    const freshGpuHealth = gpuHealth ?? await checkGpuClassifier()
+    if (freshGpuHealth && !gpuHealth) setGpuHealth(freshGpuHealth)
+    let useGpu = Boolean(freshGpuHealth)
     const classificationMemory = createClassificationMemory()
     for (const target of targets) {
       setItems((current) => current.map((item) => item.id === target.id ? { ...item, status: 'processing', error: undefined } : item))
@@ -257,7 +259,7 @@ export default function App() {
                   <button className="ghost danger" onClick={clearAll}><Trash2 size={16} /> Xóa tất cả</button>
                   <button className="analyze-button" onClick={() => void processAll()} disabled={isProcessing || doneCount === items.length}>
                     {isProcessing ? <LoaderCircle className="spin" size={18} /> : doneCount === items.length ? <Check size={18} /> : <Sparkles size={18} />}
-                    {isProcessing ? 'Đang phân tích…' : doneCount === items.length ? 'Đã phân loại' : gpuHealth ? 'Phân tích bằng GPU' : 'Phân tích bằng AI'}
+                    {isProcessing ? 'Đang phân tích…' : doneCount === items.length ? 'Đã phân loại' : gpuHealth ? 'Phân tích bằng GPU' : 'Phân tích dự phòng'}
                   </button>
                 </div>
               </div>
@@ -270,7 +272,7 @@ export default function App() {
                   </div>
                   <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
                   {isProcessing && gpuHealth && <small>Qwen3-VL đang đề xuất tag; SigLIP chấm điểm từng tag trên {gpuHealth.gpu}.</small>}
-                  {isProcessing && !gpuHealth && modelProgress && <small>{modelProgress.status === 'progress' ? `Đang tải mô hình dự phòng ${Math.round(modelProgress.progress ?? 0)}% · chỉ cần tải lần đầu` : 'Đang chuẩn bị mô hình dự phòng trong trình duyệt…'}</small>}
+                  {isProcessing && !gpuHealth && modelProgress && <small>{modelProgress.status === 'progress' ? `Đang tải mô hình dự phòng ${Math.round(modelProgress.progress ?? 0)}% · chỉ cần tải lần đầu` : 'Đang chuẩn bị CLIP dự phòng trong trình duyệt · kết quả sẽ được đánh dấu cần kiểm tra'}</small>}
                   {!isProcessing && lastEngine && <small>Lượt phân tích vừa rồi dùng {lastEngine === 'gpu' ? 'Qwen3-VL + SigLIP tag ranking trên GPU local' : 'CLIP dự phòng trong trình duyệt'}.</small>}
                 </div>
               )}

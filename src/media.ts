@@ -1,5 +1,5 @@
 import JSZip from 'jszip'
-import { ACCEPTED_IMAGE_EXTENSIONS, ACCEPTED_VIDEO_EXTENSIONS, DEFAULT_ALBUMS, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, MAX_ENTRY_BYTES } from './catalog'
+import { ACCEPTED_IMAGE_EXTENSIONS, ACCEPTED_VIDEO_EXTENSIONS, BROWSER_ALBUM_PROMPTS, DEFAULT_ALBUMS, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, MAX_ENTRY_BYTES } from './catalog'
 import type { GpuHealth, InferenceEngine, MediaItem, ModelProgress } from './types'
 
 type Classifier = (input: string, labels: string[]) => Promise<Array<{ label: string; score: number }>>
@@ -252,20 +252,45 @@ async function classifyWithGpu(image: Blob, preferredTags: string[]): Promise<Op
   return result
 }
 
-function resolvePrediction(predictions: Prediction[], fallback: string, engine: InferenceEngine) {
+function resolvePrediction(predictions: Prediction[], fallback: string, engine: InferenceEngine, gpuFailure?: string) {
   const candidateAlbums = DEFAULT_ALBUMS.filter((album) => album.id !== 'other')
-  const best = predictions[0]
-  const album = candidateAlbums.find((entry) => entry.prompt === best?.label)
-  if (!best || !album || best.score < 0.19) {
-    return { albumId: fallback, confidence: best?.score ?? null, tags: predictions.slice(0, 3).map((value) => value.label), engine }
+  const promptOwners = new Map(Object.entries(BROWSER_ALBUM_PROMPTS).flatMap(([albumId, prompts]) => prompts.map((prompt) => [prompt, albumId])))
+  const totals = new Map(candidateAlbums.map((album) => [album.id, 0]))
+  for (const prediction of predictions) {
+    const albumId = promptOwners.get(prediction.label)
+    if (albumId) totals.set(albumId, (totals.get(albumId) ?? 0) + prediction.score)
   }
-  return { albumId: album.id, confidence: best.score, tags: predictions.slice(0, 3).map((value) => value.label), engine }
+  const ranked = candidateAlbums
+    .map((album) => ({ album, score: totals.get(album.id) ?? 0 }))
+    .sort((left, right) => right.score - left.score)
+  const best = ranked[0]
+  const runnerUp = ranked[1]
+  const albumId = !best || best.score < 0.16 ? fallback : best.album.id
+  const selected = candidateAlbums.find((album) => album.id === albumId)
+  const margin = best ? best.score - (runnerUp?.score ?? 0) : 0
+  const reviewRequired = !best || best.score < 0.28 || margin < 0.08
+  const reviewReasons = [
+    ...(gpuFailure ? ['GPU classifier was unavailable; browser fallback was used.'] : ['Browser fallback was used.']),
+    ...(reviewRequired ? [`Low browser-classifier separation (${Math.round(margin * 100)} percentage points).`] : []),
+  ]
+  return {
+    albumId,
+    confidence: best?.score ?? null,
+    tags: ranked.slice(0, 5).map((value) => value.album.name),
+    scoredTags: ranked.map((value) => ({ name: value.album.name, score: value.score })),
+    classificationMethod: 'browser_clip_prompt_ensemble_v2',
+    classificationReason: `Browser CLIP prompt ensemble ranked ${selected?.name ?? 'Other'} highest.${gpuFailure ? ' The GPU classifier was unavailable.' : ''}`,
+    reviewRequired: true,
+    reviewReasons,
+    engine,
+  }
 }
 
 export async function classifyItem(item: MediaItem, onProgress: (progress: ModelProgress) => void, gpuAvailable = false, memory?: ClassificationMemory) {
   const fallback = filenameGuess(item.originalName)
-  const candidateLabels = DEFAULT_ALBUMS.filter((album) => album.id !== 'other').map((album) => album.prompt)
+  const candidateLabels = Object.values(BROWSER_ALBUM_PROMPTS).flat()
   let frameBlob: Blob | null = null
+  let gpuFailure: string | undefined
   if (gpuAvailable) {
     try {
       frameBlob = await imageBlobForGpu(item)
@@ -303,8 +328,8 @@ export async function classifyItem(item: MediaItem, onProgress: (progress: Model
         visualFingerprint: fingerprint,
         engine: 'gpu' as const,
       }
-    } catch {
-      // The private GPU may have gone offline; continue with the browser model.
+    } catch (error) {
+      gpuFailure = error instanceof Error ? error.message : 'GPU classifier failed.'
     }
   }
   let analysisUrl = item.previewUrl
@@ -317,7 +342,7 @@ export async function classifyItem(item: MediaItem, onProgress: (progress: Model
     }
     const classifier = await getClassifier(onProgress)
     const predictions = await classifier(analysisUrl, candidateLabels)
-    return resolvePrediction(predictions, fallback, 'browser')
+    return resolvePrediction(predictions, fallback, 'browser', gpuFailure)
   } catch (error) {
     return { albumId: fallback, confidence: null, tags: [], engine: 'browser' as const, error: error instanceof Error ? error.message : 'Không thể phân tích tệp.' }
   } finally {

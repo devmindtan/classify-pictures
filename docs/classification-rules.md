@@ -17,6 +17,8 @@ Phương pháp hiện tại: `ranked-english-tags-v1`. Hệ thống không dùng
 - Server chuẩn hóa các synonym phổ biến, ví dụ `app interface`, `software UI` → `application interface`; `web page` → `website interface`; `phone screenshot` → `mobile screenshot`.
 - Tag cũ chỉ là ứng viên, không bị ép thắng: SigLIP vẫn chấm trực tiếp theo ảnh và có thể chọn tag mới cho nội dung khác.
 
+Nếu GPU không sẵn sàng, CLIP trong trình duyệt dùng ba prompt độc lập cho mỗi album rồi cộng điểm theo album. Các prompt phân biệt rõ người với động vật (`human person` so với `animal without people`) để giảm lỗi do một câu mô tả đơn lẻ. Đây vẫn là chế độ dự phòng kém chính xác hơn pipeline GPU, nên mọi kết quả của nó luôn được đánh dấu `Needs review`.
+
 Qwen không được tự chọn album và điểm do Qwen tự khai không được sử dụng. Kết quả cuối đến từ bộ so khớp ảnh-văn bản SigLIP.
 
 ## 3. Quy tắc ngôn ngữ
