@@ -1,6 +1,6 @@
 # Localens
 
-Ứng dụng web local để phân tích, đổi tên và gom ảnh/video vào album. Media không được tải lên cloud. App ưu tiên Qwen3-VL trên máy GPU riêng qua SSH/Tailscale và tự chuyển sang CLIP trong trình duyệt khi GPU không sẵn sàng.
+Ứng dụng web local để phân tích, đổi tên và gom ảnh/video vào album. Media không được tải lên cloud. Qwen3-VL đề xuất tag tiếng Anh và SigLIP chấm điểm trực tiếp từng tag trên máy GPU riêng; app tự chuyển sang CLIP trong trình duyệt khi GPU không sẵn sàng.
 
 ## Chạy local
 
@@ -15,13 +15,14 @@ Mở `http://127.0.0.1:4173`. `npm run dev` đồng thời mở tunnel loopback 
 
 ```bash
 npm run gpu:deploy  # chép service lên desktop-kndgm60, chỉ cần khi source GPU thay đổi
-npm run gpu:start   # mở Qwen3-VL + tunnel 127.0.0.1:3911
+npm run gpu:start   # mở Qwen3-VL + SigLIP và tunnel 127.0.0.1:3911
 npm run gpu:status
 npm run gpu:stop
 ```
 
 - Máy GPU: `desktop-kndgm60`, GTX 1660 SUPER 6 GB.
-- Model: `qwen3-vl:2b-instruct` qua Ollama (Apache-2.0, lượng tử hóa khoảng 1,9 GB).
+- Model đề xuất tag/metadata: `qwen3-vl:2b-instruct` qua Ollama.
+- Model chấm điểm tag: `google/siglip-base-patch16-224` qua Transformers/CUDA.
 - Service chỉ bind `127.0.0.1:3910` trong WSL và chỉ được đưa về `127.0.0.1:3911` bằng SSH.
 - Không mở cổng Tailscale/LAN, không có dịch vụ cloud và không có API trả phí.
 - Nếu VoiceStudio hoặc Ollama đang giữ GPU 6 GB, Localens không giành VRAM và dùng model trình duyệt.
@@ -29,7 +30,7 @@ npm run gpu:stop
 ## Luồng sử dụng
 
 1. Chọn nhiều ảnh/video, một thư mục, hoặc tệp ZIP.
-2. Nhấn **Phân tích bằng GPU**. Qwen3-VL chọn trong taxonomy phân cấp 17 nhóm lớn/136 nhóm con, đồng thời tạo tên file, caption, tag, danh sách vật thể và OCR. Validator kiểm tra quan hệ cha-con, loại nội dung, ngưỡng tin cậy và bằng chứng; kết quả mơ hồ được đánh dấu **Cần kiểm tra**. Nếu GPU tắt/bận, app tự dùng CLIP miễn phí trong browser cache.
+2. Nhấn **Phân tích bằng GPU**. Qwen3-VL đề xuất 6-10 tag tiếng Anh; SigLIP chấm điểm và tag cao nhất trở thành album. Web hiển thị bảng xếp hạng để kiểm tra. Nếu GPU tắt/bận, app dùng CLIP miễn phí trong browser cache với tên album tiếng Anh.
 3. Kiểm tra tên file và album, chỉnh sửa nếu cần.
 4. Tải ZIP đã sắp xếp. Mỗi album là một thư mục và có thêm `phan-loai.json`.
 
@@ -55,4 +56,4 @@ npm run gpu:stop
 - `.agents/skills/screenshot`
 - `.agents/skills/security-best-practices`
 
-Quy tắc chi tiết nằm tại [`docs/classification-rules.md`](docs/classification-rules.md); taxonomy runtime nằm tại [`gpu/taxonomy.json`](gpu/taxonomy.json).
+Quy tắc chấm điểm chi tiết nằm tại [`docs/classification-rules.md`](docs/classification-rules.md).

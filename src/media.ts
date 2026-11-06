@@ -9,13 +9,12 @@ const GPU_CLASSIFIER_URL = 'http://127.0.0.1:3911'
 type Prediction = { label: string; score: number }
 
 type OpenAnalysis = {
-  taxonomy_version: string
-  category: string
-  subcategory: string
+  classification_method: string
   album: string
   filename: string
   caption: string
   tags: string[]
+  scored_tags: Array<{ name: string; score: number; raw_score?: number }>
   objects: string[]
   ocr_text: string
   evidence: string[]
@@ -233,11 +232,10 @@ export async function classifyItem(item: MediaItem, onProgress: (progress: Model
         confidence: result.confidence,
         caption: result.caption,
         tags: result.tags,
+        scoredTags: result.scored_tags.map((tag) => ({ name: tag.name, score: tag.score, rawScore: tag.raw_score })),
         objects: result.objects,
         ocrText: result.ocr_text,
-        taxonomyVersion: result.taxonomy_version,
-        category: result.category,
-        subcategory: result.subcategory,
+        classificationMethod: result.classification_method,
         evidence: result.evidence,
         classificationReason: result.classification_reason,
         reviewRequired: result.review_required,
@@ -270,7 +268,10 @@ export function suggestedName(item: MediaItem, albumName: string, index: number,
   const extension = extensionOf(item.originalName) || (item.kind === 'image' ? 'jpg' : 'mp4')
   const date = new Date(item.file.lastModified || Date.now())
   const datePart = Number.isNaN(date.getTime()) ? 'khong-ro-ngay' : date.toISOString().slice(0, 10)
-  const description = sanitizeSegment(filenameStem || albumName).toLowerCase().replaceAll(/\s+/g, '-') || 'khac'
+  const words = sanitizeSegment(filenameStem || albumName).toLowerCase().split(/\s+/).filter(Boolean)
+  const midpoint = words.length / 2
+  const deduplicated = Number.isInteger(midpoint) && words.slice(0, midpoint).join(' ') === words.slice(midpoint).join(' ') ? words.slice(0, midpoint) : words
+  const description = deduplicated.join('-') || 'other'
   return `${description}_${datePart}_${String(index + 1).padStart(3, '0')}.${extension}`
 }
 

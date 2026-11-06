@@ -23,13 +23,12 @@ export type MediaItem = {
   caption?: string
   objects?: string[]
   ocrText?: string
-  taxonomyVersion?: string
-  category?: string
-  subcategory?: string
   evidence?: string[]
   classificationReason?: string
   reviewRequired?: boolean
   reviewReasons?: string[]
+  scoredTags?: Array<{ name: string; score: number; rawScore?: number }>
+  classificationMethod?: string
   status: ProcessingStatus
   error?: string
 }
@@ -46,7 +45,8 @@ export type GpuHealth = {
   device: 'cuda'
   gpu: string
   capabilities?: string[]
-  taxonomy?: string
+  tag_model?: string
+  method?: string
 }
 
 export type InferenceEngine = 'gpu' | 'browser'

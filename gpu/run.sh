@@ -32,8 +32,12 @@ export OLLAMA_MAX_LOADED_MODELS=1
 export OLLAMA_NUM_PARALLEL=1
 export OLLAMA_KEEP_ALIVE=10m
 export OLLAMA_FLASH_ATTENTION=1
+export HF_HOME="$ROOT/models"
+export HF_HUB_DISABLE_XET=1
+export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 export LOCALENS_MODEL="${LOCALENS_MODEL:-qwen3-vl:2b-instruct}"
+export LOCALENS_TAG_MODEL="${LOCALENS_TAG_MODEL:-google/siglip-base-patch16-224}"
 
 "$OLLAMA_ROOT/bin/ollama" serve > "$ROOT/ollama.log" 2>&1 &
 OLLAMA_PID=$!

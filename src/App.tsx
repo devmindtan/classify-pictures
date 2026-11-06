@@ -87,7 +87,7 @@ export default function App() {
       setItems((current) => current.map((item) => item.id === target.id ? { ...item, status: 'processing', error: undefined } : item))
       const result = await classifyItem(target, setModelProgress, useGpu)
       const { engine, ...classification } = result
-      const openResult = classification as typeof classification & { albumName?: string; filenameStem?: string; caption?: string; objects?: string[]; ocrText?: string; taxonomyVersion?: string; category?: string; subcategory?: string; evidence?: string[]; classificationReason?: string; reviewRequired?: boolean; reviewReasons?: string[] }
+      const openResult = classification as typeof classification & { albumName?: string; filenameStem?: string; caption?: string; objects?: string[]; ocrText?: string; scoredTags?: Array<{ name: string; score: number; rawScore?: number }>; classificationMethod?: string; evidence?: string[]; classificationReason?: string; reviewRequired?: boolean; reviewReasons?: string[] }
       let resolvedAlbumId = classification.albumId
       if (openResult.albumName) {
         const resolvedAlbum = dynamicAlbum(openResult.albumName, albumsRef.current)
@@ -111,9 +111,8 @@ export default function App() {
           caption: openResult.caption,
           objects: openResult.objects,
           ocrText: openResult.ocrText,
-          taxonomyVersion: openResult.taxonomyVersion,
-          category: openResult.category,
-          subcategory: openResult.subcategory,
+          scoredTags: openResult.scoredTags,
+          classificationMethod: openResult.classificationMethod,
           evidence: openResult.evidence,
           classificationReason: openResult.classificationReason,
           reviewRequired: openResult.reviewRequired,
@@ -174,7 +173,7 @@ export default function App() {
         const dot = requestedName.lastIndexOf('.')
         const uniqueName = duplicateIndex === 0 ? requestedName : `${requestedName.slice(0, dot > 0 ? dot : undefined)}_${duplicateIndex + 1}${dot > 0 ? requestedName.slice(dot) : ''}`
         zip.folder(folderName)?.file(uniqueName, item.file)
-        manifest.push({ original: item.sourcePath, output: `${folderName}/${uniqueName}`, taxonomyVersion: item.taxonomyVersion, category: item.category, subcategory: item.subcategory, confidence: item.confidence, reviewRequired: item.reviewRequired, reviewReasons: item.reviewReasons, evidence: item.evidence, classificationReason: item.classificationReason, caption: item.caption, tags: item.tags, objects: item.objects, ocrText: item.ocrText })
+        manifest.push({ original: item.sourcePath, output: `${folderName}/${uniqueName}`, classificationMethod: item.classificationMethod, confidence: item.confidence, scoredTags: item.scoredTags, reviewRequired: item.reviewRequired, reviewReasons: item.reviewReasons, evidence: item.evidence, classificationReason: item.classificationReason, caption: item.caption, tags: item.tags, objects: item.objects, ocrText: item.ocrText })
       }
       zip.file('phan-loai.json', JSON.stringify({ exportedAt: new Date().toISOString(), files: manifest }, null, 2))
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 5 }, streamFiles: true })
@@ -215,7 +214,7 @@ export default function App() {
           <p>Thả ảnh và video vào. Localens tự phân tích, đặt tên và gom chúng vào từng album — ngay trên máy của bạn.</p>
           <div className="trust-row">
             <span><ShieldCheck size={17} /> Không tải lên cloud</span>
-            <span><Cpu size={17} /> {gpuHealth ? 'Qwen3-VL trên GPU riêng' : 'CPU local, tự chuyển GPU khi có'}</span>
+            <span><Cpu size={17} /> {gpuHealth ? 'Qwen3-VL + SigLIP trên GPU' : 'CPU local, tự chuyển GPU khi có'}</span>
             <span><Archive size={17} /> Xuất một tệp ZIP gọn gàng</span>
             <span><Pencil size={17} /> Chỉnh sửa trước khi tải</span>
           </div>
@@ -268,9 +267,9 @@ export default function App() {
                     <b>{doneCount}/{items.length} tệp</b>
                   </div>
                   <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-                  {isProcessing && gpuHealth && <small>Qwen3-VL đang đối chiếu taxonomy {gpuHealth.taxonomy ?? ''}, bằng chứng và OCR trên {gpuHealth.gpu}.</small>}
+                  {isProcessing && gpuHealth && <small>Qwen3-VL đang đề xuất tag; SigLIP chấm điểm từng tag trên {gpuHealth.gpu}.</small>}
                   {isProcessing && !gpuHealth && modelProgress && <small>{modelProgress.status === 'progress' ? `Đang tải mô hình dự phòng ${Math.round(modelProgress.progress ?? 0)}% · chỉ cần tải lần đầu` : 'Đang chuẩn bị mô hình dự phòng trong trình duyệt…'}</small>}
-                  {!isProcessing && lastEngine && <small>Lượt phân tích vừa rồi dùng {lastEngine === 'gpu' ? 'Qwen3-VL trên GPU local' : 'CLIP dự phòng trong trình duyệt'}.</small>}
+                  {!isProcessing && lastEngine && <small>Lượt phân tích vừa rồi dùng {lastEngine === 'gpu' ? 'Qwen3-VL + SigLIP tag ranking trên GPU local' : 'CLIP dự phòng trong trình duyệt'}.</small>}
                 </div>
               )}
 
@@ -324,7 +323,7 @@ export default function App() {
                       <div className="select-wrap"><span style={{ background: album.color }} /><select value={item.albumId} onChange={(event) => updateItem(item.id, { albumId: event.target.value, status: 'done' })}>{albums.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select><ChevronDown size={14} /></div>
                       <small className="original">Gốc: {item.originalName}</small>
                       {item.caption && <p className="ai-caption">{item.caption}</p>}
-                      {item.tags.length > 0 && <div className="ai-tags">{item.tags.slice(0, 5).map((tag) => <span key={tag}>{tag}</span>)}</div>}
+                      {item.scoredTags?.length ? <div className="tag-ranking" aria-label="Ranked tags">{item.scoredTags.slice(0, 5).map((tag, index) => <div key={tag.name} className={index === 0 ? 'winner' : ''}><span><b>#{index + 1}</b> {tag.name}</span><strong>{Math.round(tag.score * 100)}%</strong><i><em style={{ width: `${Math.max(3, tag.score * 100)}%` }} /></i></div>)}</div> : item.tags.length > 0 && <div className="ai-tags">{item.tags.slice(0, 5).map((tag) => <span key={tag}>{tag}</span>)}</div>}
                       {item.classificationReason && <small className="classification-reason">Lý do: {item.classificationReason}</small>}
                       {item.reviewRequired && <small className="review-reasons">Cần kiểm tra: {item.reviewReasons?.join(' · ')}</small>}
                       {item.ocrText && <small className="ocr-text" title={item.ocrText}>OCR: {item.ocrText}</small>}
@@ -346,7 +345,7 @@ export default function App() {
 
       <footer><span className="brand mini"><span className="brand-mark"><span /><span /><span /></span><span>localens</span></span><p>Ảnh của bạn ở lại với bạn.</p><span>Local-first · Open-source ready</span></footer>
 
-      {showHelp && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowHelp(false) }}><section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title"><button className="modal-close" onClick={() => setShowHelp(false)}><X /></button><span className="eyebrow">3 bước đơn giản</span><h2 id="help-title">Từ hỗn độn đến ngăn nắp</h2><div className="steps"><div><b>01</b><Upload /><h3>Nạp thư viện</h3><p>Chọn nhiều tệp, cả thư mục hoặc ZIP. Media không được gửi lên cloud.</p></div><div><b>02</b><Sparkles /><h3>AI có kiểm soát</h3><p>Qwen3-VL chọn taxonomy 2 tầng, nêu bằng chứng và tự đánh dấu kết quả mơ hồ để bạn kiểm tra.</p></div><div><b>03</b><Download /><h3>Kiểm tra & tải</h3><p>Đổi tên, chuyển album rồi tải một ZIP đã sắp xếp hoàn chỉnh.</p></div></div><p className="model-note"><ShieldCheck /> Kết nối GPU đi qua SSH/Tailscale và chỉ xuất hiện ở loopback 127.0.0.1; không có API trả phí hay cổng công khai.</p></section></div>}
+      {showHelp && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowHelp(false) }}><section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title"><button className="modal-close" onClick={() => setShowHelp(false)}><X /></button><span className="eyebrow">3 bước đơn giản</span><h2 id="help-title">Từ hỗn độn đến ngăn nắp</h2><div className="steps"><div><b>01</b><Upload /><h3>Nạp thư viện</h3><p>Chọn nhiều tệp, cả thư mục hoặc ZIP. Media không được gửi lên cloud.</p></div><div><b>02</b><Sparkles /><h3>Rank English tags</h3><p>Qwen3-VL proposes English tags; SigLIP scores each tag from the image. The highest score becomes the album.</p></div><div><b>03</b><Download /><h3>Kiểm tra & tải</h3><p>Xem bảng điểm, đổi tên hoặc album rồi tải ZIP đã sắp xếp.</p></div></div><p className="model-note"><ShieldCheck /> Kết nối GPU đi qua SSH/Tailscale và chỉ xuất hiện ở loopback 127.0.0.1; không có API trả phí hay cổng công khai.</p></section></div>}
     </div>
   )
 }

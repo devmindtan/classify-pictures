@@ -149,6 +149,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .status-badge.needs-review { background: #fff1d8; color: #985f1f; }
 .classification-reason { display: block; color: #777b72; font-size: 8px; line-height: 1.35; margin-top: 5px; }
 .review-reasons { display: block; background: #fff5e5; border-radius: 6px; color: #985f1f; font-size: 8px; line-height: 1.4; margin-top: 5px; padding: 5px 6px; }
+.tag-ranking { display: grid; gap: 4px; margin: 7px 0; }
+.tag-ranking > div { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 7px; color: #777b72; font-size: 8px; }
+.tag-ranking > div.winner { color: var(--green); font-weight: 700; }
+.tag-ranking span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-ranking b { color: #a2a49d; font-size: 7px; }
+.tag-ranking strong { font-size: 8px; }
+.tag-ranking i { grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 99px; background: #eceee8; }
+.tag-ranking em { display: block; height: 100%; border-radius: inherit; background: #a5b5aa; }
+.tag-ranking .winner em { background: var(--green); }
 
 .export-bar { margin-top: 28px; border: 1px solid #cfd9c8; border-radius: 14px; background: #eef5e8; padding: 17px 19px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; }
 .export-icon { width: 39px; height: 39px; border-radius: 10px; display: grid; place-items: center; color: var(--green); background: #dbe9d0; }
