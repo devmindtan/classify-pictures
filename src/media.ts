@@ -24,6 +24,13 @@ type OpenAnalysis = {
   confidence: number
 }
 
+type MemoryRecord = { fingerprint: string; result: OpenAnalysis }
+export type ClassificationMemory = { records: MemoryRecord[] }
+
+export function createClassificationMemory(): ClassificationMemory {
+  return { records: [] }
+}
+
 export async function checkGpuClassifier(): Promise<GpuHealth | null> {
   try {
     const response = await fetch(`${GPU_CLASSIFIER_URL}/health`, { signal: AbortSignal.timeout(1800) })
@@ -194,8 +201,46 @@ async function imageBlobForGpu(item: MediaItem) {
   }
 }
 
-async function classifyWithGpu(image: Blob): Promise<OpenAnalysis> {
-  const response = await fetch(`${GPU_CLASSIFIER_URL}/analyze`, {
+async function visualFingerprint(image: Blob) {
+  const bitmap = await createImageBitmap(image)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = 9
+    canvas.height = 8
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) throw new Error('Không tạo được fingerprint hình ảnh.')
+    context.drawImage(bitmap, 0, 0, 9, 8)
+    const pixels = context.getImageData(0, 0, 9, 8).data
+    let hash = 0n
+    for (let row = 0; row < 8; row += 1) {
+      for (let column = 0; column < 8; column += 1) {
+        const left = (row * 9 + column) * 4
+        const right = left + 4
+        const leftGray = pixels[left] * 0.299 + pixels[left + 1] * 0.587 + pixels[left + 2] * 0.114
+        const rightGray = pixels[right] * 0.299 + pixels[right + 1] * 0.587 + pixels[right + 2] * 0.114
+        if (leftGray > rightGray) hash |= 1n << BigInt(row * 8 + column)
+      }
+    }
+    return hash.toString(16).padStart(16, '0')
+  } finally {
+    bitmap.close()
+  }
+}
+
+function fingerprintDistance(left: string, right: string) {
+  let difference = BigInt(`0x${left}`) ^ BigInt(`0x${right}`)
+  let distance = 0
+  while (difference) {
+    distance += Number(difference & 1n)
+    difference >>= 1n
+  }
+  return distance
+}
+
+async function classifyWithGpu(image: Blob, preferredTags: string[]): Promise<OpenAnalysis> {
+  const params = new URLSearchParams()
+  preferredTags.forEach((tag) => params.append('preferred_tag', tag))
+  const response = await fetch(`${GPU_CLASSIFIER_URL}/analyze?${params}`, {
     method: 'POST',
     headers: { 'Content-Type': image.type || 'application/octet-stream' },
     body: image,
@@ -217,14 +262,29 @@ function resolvePrediction(predictions: Prediction[], fallback: string, engine: 
   return { albumId: album.id, confidence: best.score, tags: predictions.slice(0, 3).map((value) => value.label), engine }
 }
 
-export async function classifyItem(item: MediaItem, onProgress: (progress: ModelProgress) => void, gpuAvailable = false) {
+export async function classifyItem(item: MediaItem, onProgress: (progress: ModelProgress) => void, gpuAvailable = false, memory?: ClassificationMemory) {
   const fallback = filenameGuess(item.originalName)
   const candidateLabels = DEFAULT_ALBUMS.filter((album) => album.id !== 'other').map((album) => album.prompt)
   let frameBlob: Blob | null = null
   if (gpuAvailable) {
     try {
       frameBlob = await imageBlobForGpu(item)
-      const result = await classifyWithGpu(frameBlob)
+      const fingerprint = await visualFingerprint(frameBlob)
+      const nearest = memory?.records
+        .map((record) => ({ record, distance: fingerprintDistance(fingerprint, record.fingerprint) }))
+        .sort((left, right) => left.distance - right.distance)[0]
+      let result: OpenAnalysis
+      if (nearest && nearest.distance <= 6) {
+        result = {
+          ...nearest.record.result,
+          classification_method: 'perceptual_hash_reuse',
+          classification_reason: `Reused the classification of a visually matching image (dHash distance ${nearest.distance}/64).`,
+        }
+      } else {
+        const preferredTags = [...new Set(memory?.records.map((record) => record.result.scored_tags[0]?.name).filter((tag): tag is string => Boolean(tag)) ?? [])].slice(0, 12)
+        result = await classifyWithGpu(frameBlob, preferredTags)
+        memory?.records.push({ fingerprint, result })
+      }
       return {
         albumId: '',
         albumName: result.album,
@@ -240,6 +300,7 @@ export async function classifyItem(item: MediaItem, onProgress: (progress: Model
         classificationReason: result.classification_reason,
         reviewRequired: result.review_required,
         reviewReasons: result.review_reasons,
+        visualFingerprint: fingerprint,
         engine: 'gpu' as const,
       }
     } catch {

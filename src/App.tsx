@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import JSZip from 'jszip'
 import { Archive, Check, ChevronDown, CircleHelp, Cpu, Download, FileArchive, FolderInput, Image as ImageIcon, ListFilter, LoaderCircle, LockKeyhole, Pencil, Play, Search, ShieldCheck, Sparkles, Trash2, Upload, Video, X } from 'lucide-react'
 import { DEFAULT_ALBUMS } from './catalog'
-import { checkGpuClassifier, classifyItem, expandInputFiles, makeMediaItem, sanitizeSegment, suggestedName } from './media'
+import { checkGpuClassifier, classifyItem, createClassificationMemory, expandInputFiles, makeMediaItem, sanitizeSegment, suggestedName } from './media'
 import type { AlbumDefinition, GpuHealth, InferenceEngine, MediaItem, ModelProgress } from './types'
 
 type Filter = 'all' | 'image' | 'video'
@@ -83,11 +83,12 @@ export default function App() {
     if (!targets.length || isProcessing) return
     setIsProcessing(true)
     let useGpu = Boolean(gpuHealth)
+    const classificationMemory = createClassificationMemory()
     for (const target of targets) {
       setItems((current) => current.map((item) => item.id === target.id ? { ...item, status: 'processing', error: undefined } : item))
-      const result = await classifyItem(target, setModelProgress, useGpu)
+      const result = await classifyItem(target, setModelProgress, useGpu, classificationMemory)
       const { engine, ...classification } = result
-      const openResult = classification as typeof classification & { albumName?: string; filenameStem?: string; caption?: string; objects?: string[]; ocrText?: string; scoredTags?: Array<{ name: string; score: number; rawScore?: number }>; classificationMethod?: string; evidence?: string[]; classificationReason?: string; reviewRequired?: boolean; reviewReasons?: string[] }
+      const openResult = classification as typeof classification & { albumName?: string; filenameStem?: string; caption?: string; objects?: string[]; ocrText?: string; scoredTags?: Array<{ name: string; score: number; rawScore?: number }>; classificationMethod?: string; visualFingerprint?: string; evidence?: string[]; classificationReason?: string; reviewRequired?: boolean; reviewReasons?: string[] }
       let resolvedAlbumId = classification.albumId
       if (openResult.albumName) {
         const resolvedAlbum = dynamicAlbum(openResult.albumName, albumsRef.current)
@@ -113,6 +114,7 @@ export default function App() {
           ocrText: openResult.ocrText,
           scoredTags: openResult.scoredTags,
           classificationMethod: openResult.classificationMethod,
+          visualFingerprint: openResult.visualFingerprint,
           evidence: openResult.evidence,
           classificationReason: openResult.classificationReason,
           reviewRequired: openResult.reviewRequired,
@@ -173,7 +175,7 @@ export default function App() {
         const dot = requestedName.lastIndexOf('.')
         const uniqueName = duplicateIndex === 0 ? requestedName : `${requestedName.slice(0, dot > 0 ? dot : undefined)}_${duplicateIndex + 1}${dot > 0 ? requestedName.slice(dot) : ''}`
         zip.folder(folderName)?.file(uniqueName, item.file)
-        manifest.push({ original: item.sourcePath, output: `${folderName}/${uniqueName}`, classificationMethod: item.classificationMethod, confidence: item.confidence, scoredTags: item.scoredTags, reviewRequired: item.reviewRequired, reviewReasons: item.reviewReasons, evidence: item.evidence, classificationReason: item.classificationReason, caption: item.caption, tags: item.tags, objects: item.objects, ocrText: item.ocrText })
+        manifest.push({ original: item.sourcePath, output: `${folderName}/${uniqueName}`, classificationMethod: item.classificationMethod, visualFingerprint: item.visualFingerprint, confidence: item.confidence, scoredTags: item.scoredTags, reviewRequired: item.reviewRequired, reviewReasons: item.reviewReasons, evidence: item.evidence, classificationReason: item.classificationReason, caption: item.caption, tags: item.tags, objects: item.objects, ocrText: item.ocrText })
       }
       zip.file('phan-loai.json', JSON.stringify({ exportedAt: new Date().toISOString(), files: manifest }, null, 2))
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 5 }, streamFiles: true })
@@ -345,7 +347,7 @@ export default function App() {
 
       <footer><span className="brand mini"><span className="brand-mark"><span /><span /><span /></span><span>localens</span></span><p>Ảnh của bạn ở lại với bạn.</p><span>Local-first · Open-source ready</span></footer>
 
-      {showHelp && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowHelp(false) }}><section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title"><button className="modal-close" onClick={() => setShowHelp(false)}><X /></button><span className="eyebrow">3 bước đơn giản</span><h2 id="help-title">Từ hỗn độn đến ngăn nắp</h2><div className="steps"><div><b>01</b><Upload /><h3>Nạp thư viện</h3><p>Chọn nhiều tệp, cả thư mục hoặc ZIP. Media không được gửi lên cloud.</p></div><div><b>02</b><Sparkles /><h3>Rank English tags</h3><p>Qwen3-VL proposes English tags; SigLIP scores each tag from the image. The highest score becomes the album.</p></div><div><b>03</b><Download /><h3>Kiểm tra & tải</h3><p>Xem bảng điểm, đổi tên hoặc album rồi tải ZIP đã sắp xếp.</p></div></div><p className="model-note"><ShieldCheck /> Kết nối GPU đi qua SSH/Tailscale và chỉ xuất hiện ở loopback 127.0.0.1; không có API trả phí hay cổng công khai.</p></section></div>}
+      {showHelp && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowHelp(false) }}><section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title"><button className="modal-close" onClick={() => setShowHelp(false)}><X /></button><span className="eyebrow">3 bước đơn giản</span><h2 id="help-title">Từ hỗn độn đến ngăn nắp</h2><div className="steps"><div><b>01</b><Upload /><h3>Nạp thư viện</h3><p>Chọn nhiều tệp, cả thư mục hoặc ZIP. Media không được gửi lên cloud.</p></div><div><b>02</b><Sparkles /><h3>Rank English tags</h3><p>Qwen3-VL proposes tags; SigLIP scores them. Visual matches reuse one result, while similar images share prior winning tags.</p></div><div><b>03</b><Download /><h3>Kiểm tra & tải</h3><p>Xem bảng điểm, đổi tên hoặc album rồi tải ZIP đã sắp xếp.</p></div></div><p className="model-note"><ShieldCheck /> Kết nối GPU đi qua SSH/Tailscale và chỉ xuất hiện ở loopback 127.0.0.1; không có API trả phí hay cổng công khai.</p></section></div>}
     </div>
   )
 }

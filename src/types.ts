@@ -29,6 +29,7 @@ export type MediaItem = {
   reviewReasons?: string[]
   scoredTags?: Array<{ name: string; score: number; rawScore?: number }>
   classificationMethod?: string
+  visualFingerprint?: string
   status: ProcessingStatus
   error?: string
 }

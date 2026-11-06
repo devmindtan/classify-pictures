@@ -13,7 +13,7 @@ import urllib.request
 from contextlib import asynccontextmanager
 
 import torch
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageOps, UnidentifiedImageError
 from transformers import pipeline
@@ -27,6 +27,24 @@ MIN_SCORE_MARGIN = 0.04
 Image.MAX_IMAGE_PIXELS = 50_000_000
 inference_lock = asyncio.Lock()
 tag_classifier = None
+
+TAG_ALIASES = {
+    "app interface": "application interface",
+    "application ui": "application interface",
+    "software interface": "application interface",
+    "software ui": "application interface",
+    "web interface": "website interface",
+    "web page": "website interface",
+    "webpage": "website interface",
+    "desktop screen": "desktop screenshot",
+    "computer screenshot": "desktop screenshot",
+    "mobile screen": "mobile screenshot",
+    "phone screenshot": "mobile screenshot",
+    "dog photo": "dog",
+    "cat photo": "cat",
+    "food photo": "food",
+    "nature photo": "natural landscape",
+}
 
 OUTPUT_SCHEMA = {
     "type": "object",
@@ -158,6 +176,11 @@ def album_worthy_tag(tag: str) -> bool:
     return True
 
 
+def canonical_tag(tag: str) -> str:
+    normalized = re.sub(r"\s+", " ", tag.strip().lower())
+    return TAG_ALIASES.get(normalized, normalized)
+
+
 def english_text(value: object, fallback: str, limit: int) -> str:
     text = clean_text(value, fallback, limit)
     ascii_letters = sum(character.isascii() for character in text)
@@ -233,14 +256,17 @@ def rank_tags(image: Image.Image, candidates: list[str]) -> list[dict]:
     return sorted(ranked, key=lambda item: item["score"], reverse=True)
 
 
-def analyze_image(image_bytes: bytes, image: Image.Image, width: int, height: int) -> dict:
+def analyze_image(image_bytes: bytes, image: Image.Image, width: int, height: int, preferred_tags: list[str]) -> dict:
     result, recovered = propose_metadata(image_bytes, width, height)
-    candidates = english_list(result.get("candidate_tags"), 10)
+    candidates = [canonical_tag(tag) for tag in english_list(result.get("candidate_tags"), 10)]
+    preferred = [canonical_tag(tag) for tag in preferred_tags if is_english_label(canonical_tag(tag))]
     banned = {"image", "photo", "content", "media", "miscellaneous", "other", "unknown"}
+    candidates = list(dict.fromkeys([*preferred, *candidates]))
     candidates = [tag for tag in candidates if tag not in banned and album_worthy_tag(tag)]
     if any(term in tag for tag in candidates for term in ("screen", "interface", "organizer", "website", "app")):
         ui_tags = ["desktop screenshot", "application interface", "website interface", "user interface"]
-        candidates = [*ui_tags, *[tag for tag in candidates if tag not in ui_tags]][:10]
+        candidates = [*preferred, *ui_tags, *[tag for tag in candidates if tag not in preferred and tag not in ui_tags]]
+    candidates = list(dict.fromkeys(candidates))[:16]
     if len(candidates) < 4:
         for fallback in ["people", "animals", "food", "natural landscape", "document", "screenshot", "product", "vehicle"]:
             if fallback not in candidates:
@@ -290,7 +316,7 @@ def analyze_image(image_bytes: bytes, image: Image.Image, width: int, height: in
 
 
 @app.post("/analyze")
-async def analyze(request: Request):
+async def analyze(request: Request, preferred_tag: list[str] = Query(default=[])):
     if tag_classifier is None:
         raise HTTPException(status_code=503, detail="Tag scoring model is still loading")
     declared_size = int(request.headers.get("content-length", "0") or 0)
@@ -312,6 +338,7 @@ async def analyze(request: Request):
         raise HTTPException(status_code=415, detail="Unsupported or unsafe image") from error
     try:
         async with inference_lock:
-            return await asyncio.to_thread(analyze_image, output.getvalue(), scoring_image, width, height)
+            safe_preferred = [tag for tag in preferred_tag if len(tag) <= 40][:12]
+            return await asyncio.to_thread(analyze_image, output.getvalue(), scoring_image, width, height, safe_preferred)
     except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError, urllib.error.HTTPError) as error:
         raise HTTPException(status_code=502, detail="Local vision models returned an invalid response") from error

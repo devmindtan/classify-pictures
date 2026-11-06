@@ -30,7 +30,7 @@ npm run gpu:stop
 ## Luồng sử dụng
 
 1. Chọn nhiều ảnh/video, một thư mục, hoặc tệp ZIP.
-2. Nhấn **Phân tích bằng GPU**. Qwen3-VL đề xuất 6-10 tag tiếng Anh; SigLIP chấm điểm và tag cao nhất trở thành album. Web hiển thị bảng xếp hạng để kiểm tra. Nếu GPU tắt/bận, app dùng CLIP miễn phí trong browser cache với tên album tiếng Anh.
+2. Nhấn **Phân tích bằng GPU**. Qwen3-VL đề xuất 6-10 tag tiếng Anh; SigLIP chấm điểm và tag cao nhất trở thành album. Ảnh trùng/gần trùng tái sử dụng kết quả bằng perceptual hash; các ảnh còn lại luôn được chấm thêm với những album đã thắng trước đó để giữ tên nhất quán. Web hiển thị bảng xếp hạng để kiểm tra. Nếu GPU tắt/bận, app dùng CLIP miễn phí trong browser cache với tên album tiếng Anh.
 3. Kiểm tra tên file và album, chỉnh sửa nếu cần.
 4. Tải ZIP đã sắp xếp. Mỗi album là một thư mục và có thêm `phan-loai.json`.
 
